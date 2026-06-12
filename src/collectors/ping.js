@@ -35,6 +35,22 @@ class PingCollector {
     this.lastPayload       = null;
     this._permissionDenied = false;
     this._lossWindow       = []; // bool[] — true = replied
+
+    // Listeners registered once in constructor so that stop()+start() cycles
+    // (pingEnabled toggle, streamMode change) never accumulate extra listeners.
+    this.io.on('connection', () => {
+      if (this.streamMode && !this._stream) this._startStream();
+    });
+    this.ros.on('close', () => {
+      this._stopStream();
+      if (this._pollTimer) { clearTimeout(this._pollTimer); this._pollTimer = null; }
+    });
+    this.ros.on('connected', () => {
+      this._lastFp = '';
+      this._permissionDenied = false;
+      this._stream = null;
+      this._startPing();
+    });
   }
 
   _parseRtt(val) {
@@ -189,19 +205,6 @@ class PingCollector {
 
   start() {
     this._startPing();
-    this.io.on('connection', () => {
-      if (this.streamMode && !this._stream) this._startStream();
-    });
-    this.ros.on('close', () => {
-      this._stopStream();
-      if (this._pollTimer) { clearTimeout(this._pollTimer); this._pollTimer = null; }
-    });
-    this.ros.on('connected', () => {
-      this._lastFp = '';
-      this._permissionDenied = false;
-      this._stream = null;
-      this._startPing();
-    });
   }
 
   suspend() {

@@ -41,6 +41,16 @@ class WirelessCollector {
     this._inflight    = false;
     this._nameCache   = new Map();
     this._retryTimer  = null;
+
+    // Listeners registered once in constructor so that stop()+start() cycles
+    // (streamMode toggle, settings changes) don't accumulate extra listeners.
+    this.ros.on('close', () => this.stop());
+    this.ros.on('connected', () => {
+      this.stop();
+      this._resetState();
+      this._runFirst();
+      this._scheduleNext();
+    });
   }
 
   resolveName(mac) {
@@ -264,25 +274,22 @@ class WirelessCollector {
     if (this.ros.connected) this._scheduleNext();
   }
 
-  start() {
-    this._debug = require('../settings').load().rosDebug;
-    const runFirst = async () => {
-      if (this._inflight) return;
-      this._inflight = true;
+  _runFirst() {
+    if (this._inflight) return;
+    this._inflight = true;
+    const doRun = async () => {
       try { await this.tick(true); } catch (e) {
         this.state.lastWirelessErr = String(e && e.message ? e.message : e);
         console.error('[wireless]', this.state.lastWirelessErr);
       } finally { this._inflight = false; }
     };
-    runFirst();
+    doRun();
+  }
+
+  start() {
+    this._debug = require('../settings').load().rosDebug;
+    this._runFirst();
     this._scheduleNext();
-    this.ros.on('close', () => this.stop());
-    this.ros.on('connected', () => {
-      this.stop();
-      this._resetState();
-      runFirst();
-      this._scheduleNext();
-    });
   }
 
   suspend() {

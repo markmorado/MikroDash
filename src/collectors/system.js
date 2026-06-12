@@ -19,6 +19,26 @@ class SystemCollector {
     this._lastFp           = '';
     this.lastPayload       = null;
     this._boardNameReported = false;
+
+    // Listeners registered once in constructor so that stop()+start() cycles
+    // (streamMode toggle) don't accumulate extra listeners.
+    this.ros.on('close', () => this.stop());
+    this.ros.on('connected', () => {
+      // Tear down any live stream/timers before restarting to prevent duplicates.
+      if (this._stream) { try { this._stream.stop().catch(() => {}); } catch (_) {} this._stream = null; }
+      if (this._pollTimer)  { clearTimeout(this._pollTimer);  this._pollTimer  = null; }
+      if (this._healthTimer) { clearTimeout(this._healthTimer); this._healthTimer = null; }
+      this._pollInflight   = false;
+      this._healthInflight = false;
+      this._restarting     = false;
+      this._lastFp = '';
+      this._lastUpdateFetch = 0;
+      this._lastUpdateRow = {};
+      this._startResources();
+      this._scheduleHealthNext();
+      this._pollHealth();
+      this._fetchUpdateStatus().catch(() => {}); // re-check on reconnect
+    });
   }
 
   // Fetch update status independently so a slow RouterOS update-server
@@ -268,23 +288,6 @@ class SystemCollector {
     this._scheduleHealthNext();
     this._startResources();
     this._fetchUpdateStatus().catch(() => {}); // run once at startup
-    this.ros.on('close', () => this.stop());
-    this.ros.on('connected', () => {
-      // Tear down any live stream/timers before restarting to prevent duplicates.
-      if (this._stream) { try { this._stream.stop().catch(() => {}); } catch (_) {} this._stream = null; }
-      if (this._pollTimer)  { clearTimeout(this._pollTimer);  this._pollTimer  = null; }
-      if (this._healthTimer) { clearTimeout(this._healthTimer); this._healthTimer = null; }
-      this._pollInflight   = false;
-      this._healthInflight = false;
-      this._restarting     = false;
-      this._lastFp = '';
-      this._lastUpdateFetch = 0;
-      this._lastUpdateRow = {};
-      this._startResources();
-      this._scheduleHealthNext();
-      this._pollHealth();
-      this._fetchUpdateStatus().catch(() => {}); // re-check on reconnect
-    });
   }
 
   suspend() {

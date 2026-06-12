@@ -62,11 +62,31 @@ class BandwidthCollector {
       this._lastFp = '';
       this._lastSnapshotTs = 0;
       // Only restart here on reconnect after a close. On the very first
-      // connect, startCollectors() in index.js calls start() explicitly —
-      // calling stop()+start() here too would create two concurrent intervals.
-      if (this._started) {
-        this.stop();
-        this.start();
+      // connect, startCollectors() in index.js calls start() explicitly.
+      // Rather than calling stop()+start() (which creates a new _scheduleNext
+      // closure each reconnect), just let the existing timer chain continue —
+      // it will resume naturally on the next tick since ros.connected is checked.
+      if (this._started && !this.timer && !this._stopping) {
+        this._stopping = false;
+        this._inflight = false;
+        // Trigger an immediate tick by restarting the timer chain
+        const reschedule = () => {
+          if (this._stopping) return;
+          this.timer = setTimeout(async () => {
+            this.timer = null;
+            if (this._inflight) return;
+            this._inflight = true;
+            try { await this.tick(); } catch (e) {
+              const msg = String(e && e.message ? e.message : e);
+              if (!msg.includes('no such item')) {
+                this.state.lastBandwidthErr = msg;
+                console.error('[bandwidth]', msg);
+              }
+            } finally { this._inflight = false; }
+            reschedule();
+          }, this._pollDelayMs);
+        };
+        reschedule();
       }
     });
   }

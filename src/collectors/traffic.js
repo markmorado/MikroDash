@@ -44,6 +44,17 @@ class TrafficCollector {
     this._loggedErr    = false;
     this._restartTimer = null;
     this.lastWanStatus = null;
+
+    // Listeners registered once in constructor — never in start() — so that
+    // stop()+start() cycles (streamMode toggle, settings changes) don't
+    // accumulate duplicate ros event listeners.
+    this.ros.on('connected', () => {
+      this._ifNamesKey = ''; // force restart on reconnect
+      this._stopAllStream();
+      this._ensureHistory(this.defaultIf);
+      this._updateStream(); // restart with current subscription set
+    });
+    this.ros.on('close', () => this._stopAllStream());
   }
 
   _ensureHistory(ifName) {
@@ -214,15 +225,6 @@ class TrafficCollector {
   start() {
     this._ensureHistory(this.defaultIf);
     this._startAllStream();
-
-    this.ros.on('connected', () => {
-      this._ifNamesKey = ''; // force restart on reconnect
-      this._stopAllStream();
-      this._ensureHistory(this.defaultIf);
-      this._updateStream(); // restart with current subscription set
-    });
-
-    this.ros.on('close', () => this._stopAllStream());
   }
 
   stop() { this._stopAllStream(); }

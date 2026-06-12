@@ -154,15 +154,37 @@ class ROS extends EventEmitter {
 
   /**
    * Persistent push stream.
-   * CORRECT signature: conn.stream(wordsArray, callback)
-   *   wordsArray — ['/cmd', '=param=value', ...]
-   *   callback   — function(err, data) called on every !re sentence
+   *
+   * Two supported call forms (mirrors ros.write() pattern):
+   *
+   *   2-arg: ros.stream(['/cmd', '=k=v', ...], callback)
+   *     wordsArray  — command + all parameters in a single array
+   *     callback    — function(err, data) | null  (null → use 'data' event)
+   *
+   *   3-arg: ros.stream('/cmd', ['=k=v', ...], callback)
+   *     cmd         — command string (converted to first element of array)
+   *     params      — array of '=key=value' parameter strings
+   *     callback    — function(err, data) | null
+   *
+   * The 3-arg form exists so collectors can pass parameters separately
+   * without concatenating arrays, matching the write() calling convention.
    * Returns a Stream object with .stop(), .pause(), .resume() methods.
    */
-  stream(words, callback) {
+  stream(words, paramsOrCallback, callback) {
     if (!this.conn || !this.connected) throw new Error('Not connected');
-    if (!Array.isArray(words)) words = [words];
-    return this.conn.stream(words, callback);
+    let wordsArr;
+    let cb;
+    if (Array.isArray(paramsOrCallback)) {
+      // 3-arg form: stream(cmd, params, callback)
+      const cmd = Array.isArray(words) ? words[0] : words;
+      wordsArr = [cmd, ...paramsOrCallback];
+      cb = callback !== undefined ? callback : null;
+    } else {
+      // 2-arg form: stream(wordsArray, callback)
+      wordsArr = Array.isArray(words) ? words : [words];
+      cb = paramsOrCallback;
+    }
+    return this.conn.stream(wordsArr, cb);
   }
 
   stop() {

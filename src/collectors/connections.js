@@ -80,8 +80,15 @@ class ConnectionsCollector {
       if (this._started) {
         this._lastFp = '';
         this._lastDetailFp = '';
+        // Do NOT call start() here — that would accumulate a new watchdog
+        // interval and a new poll timer on every reconnect. Instead, stop
+        // existing timers/streams and restart them directly (mirrors what
+        // stop() + start() would do, but without re-registering listeners).
         this.stop();
-        this.start();
+        this._started = true; // stop() doesn't clear _started, but be explicit
+        try { this._debug = !!(settings.load().rosDebug); } catch (_) { this._debug = false; }
+        this._startPollFallback();
+        this._startWatchdog();
       }
     });
   }

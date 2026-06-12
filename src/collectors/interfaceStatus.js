@@ -47,9 +47,11 @@ class InterfaceStatusCollector {
     this._ifacesNext = new Map(); // accumulator for current metadata tick
     this._addrsNext  = new Map(); // accumulator for current metadata tick
 
-    this._ifStream     = null;
-    this._addrStream   = null;
-    this._metaDebounce = null;
+    this._ifStream        = null;
+    this._ifRestartTimer  = null; // guard against timer accumulation
+    this._addrStream      = null;
+    this._addrRestartTimer = null; // guard against timer accumulation
+    this._metaDebounce    = null;
 
     this._monitorStream        = null;
     this._streamRates          = new Map(); // name -> { rxMbps, txMbps }
@@ -119,6 +121,8 @@ class InterfaceStatusCollector {
   }
 
   _stopMetaStreams() {
+    if (this._ifRestartTimer)   { clearTimeout(this._ifRestartTimer);   this._ifRestartTimer   = null; }
+    if (this._addrRestartTimer) { clearTimeout(this._addrRestartTimer); this._addrRestartTimer = null; }
     if (this._ifStream)   { try { this._ifStream.stop().catch(() => {}); }   catch (e) {} this._ifStream   = null; }
     if (this._addrStream) { try { this._addrStream.stop().catch(() => {}); } catch (e) {} this._addrStream = null; }
     clearTimeout(this._metaDebounce);
@@ -152,7 +156,12 @@ class InterfaceStatusCollector {
     stream.on('error', (err) => {
       console.error('[ifstatus] /interface/print stream error:', err && err.message ? err.message : String(err));
       this._ifStream = null;
-      setTimeout(() => { if (this.ros.connected && !this._ifStream) this._startIfStream(); }, 3000);
+      if (!this._ifRestartTimer) {
+        this._ifRestartTimer = setTimeout(() => {
+          this._ifRestartTimer = null;
+          if (this.ros.connected && !this._ifStream) this._startIfStream();
+        }, 3000);
+      }
     });
     this._ifStream = stream;
   }
@@ -178,7 +187,12 @@ class InterfaceStatusCollector {
     stream.on('error', (err) => {
       console.error('[ifstatus] /ip/address/print stream error:', err && err.message ? err.message : String(err));
       this._addrStream = null;
-      setTimeout(() => { if (this.ros.connected && !this._addrStream) this._startAddrStream(); }, 3000);
+      if (!this._addrRestartTimer) {
+        this._addrRestartTimer = setTimeout(() => {
+          this._addrRestartTimer = null;
+          if (this.ros.connected && !this._addrStream) this._startAddrStream();
+        }, 3000);
+      }
     });
     this._addrStream = stream;
   }
@@ -244,15 +258,18 @@ class InterfaceStatusCollector {
       this._monitorIfaceKey = '';
       this._streamRates.clear();
       // 'no such item' fires when an interface in the list briefly disappears.
-      // Suppress the log and reschedule — avoid a rapid restart loop.
-      if (msg.includes('no such item')) {
+      // All other errors (API timeout, transient reset) also need a reschedule
+      // so rates don't go silent until the next full ROS reconnect.
+      const delay = msg.includes('no such item') ? 5000 : 3000;
+      if (!msg.includes('no such item')) {
+        console.error('[ifstatus] monitor-traffic stream error:', msg);
+      }
+      if (!this._monitorRestartTimer) {
         this._monitorRestartTimer = setTimeout(() => {
           this._monitorRestartTimer = null;
           if (this.ros.connected) this._startMonitorStream();
-        }, 5000);
-        return;
+        }, delay);
       }
-      console.error('[ifstatus] monitor-traffic stream error:', msg);
     });
     this._monitorStream   = stream;
     this._monitorIfaceKey = key;
